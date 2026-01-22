@@ -464,7 +464,8 @@ class CPLEX_RTMONF_Solver:
             'num_assigned_tasks': len(task_assignment),
             'num_unassigned_tasks': len(unassigned_tasks),
             'num_replenished': len(replenishment_plan),
-            'objective_value': sol.get_objective_value(),
+            'objective_value': eval_results['utility'],  # 使用utility作为objective_value，与RTM-RPF保持一致
+            'cplex_objective': sol.get_objective_value(),  # 保留CPLEX原始目标值用于调试
             'violations': eval_results.get('violations', []),
             'mip_gap': m.solve_details.mip_relative_gap if hasattr(m.solve_details, 'mip_relative_gap') else None
         }
