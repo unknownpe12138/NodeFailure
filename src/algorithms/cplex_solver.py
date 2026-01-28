@@ -337,23 +337,13 @@ class CPLEX_RTMONF_Solver:
             completion_expr = 0
 
         # 【修复】负载集中惩罚：当智能体承担更多任务时，降低完成率
-        # 使用二次惩罚近似负载对存活率的非线性影响
-        # 惩罚 = Σ_i (Σ_k workload_k * x[i,k])^2 的线性近似
-        # 由于MILP不支持二次项，使用辅助变量进行分段线性近似
-        load_penalty_coeff = 0.01  # 负载惩罚系数
-        load_penalty_expr = m.sum(
-            task_workloads[k] * x[(i, k)] * load_penalty_coeff
-            for i in agent_ids for k in task_ids
-        )
+        # 【修复】移除惩罚项，优化纯 utility
+        # 原来的惩罚项会干扰优化，导致 CPLEX 不是真正优化 utility
+        # 负载约束和任务分配约束应该通过约束条件实现，而不是惩罚项
 
-        # 未分配任务惩罚
-        avg_workload = sum(t.workload for t in tasks) / len(tasks) if tasks else 1.0
-        unassigned_penalty_coeff = avg_workload * 10.0
-        unassigned_penalty = unassigned_penalty_coeff * m.sum(u[k] for k in task_ids)
-
-        # 目标：最小化 (λ1 * Cost - λ2 * Completion + 负载惩罚 + 未分配惩罚)
-        # 等价于最大化效用
-        objective = p.lambda1 * total_cost_expr - p.lambda2 * completion_expr * 100 + load_penalty_expr + unassigned_penalty
+        # 目标：最小化 -utility = λ1 * Cost - λ2 * Completion * 100
+        # 等价于最大化 utility = -λ1 * Cost + λ2 * Completion * 100
+        objective = p.lambda1 * total_cost_expr - p.lambda2 * completion_expr * 100
 
         m.minimize(objective)
 

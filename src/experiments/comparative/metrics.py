@@ -80,22 +80,28 @@ class MetricsCollector:
 
     def aggregate_results(self, results_list: List[Dict[str, float]]) -> Dict[str, float]:
         """
-        聚合多次实验结果，计算平均值
+        聚合多次实验结果，计算平均值和95%置信区间
 
         Args:
             results_list: 多次实验的指标列表
 
         Returns:
-            平均指标字典
+            平均指标字典（包含均值、标准差和95%置信区间）
         """
         if not results_list:
             return {metric: 0.0 for metric in METRICS}
 
+        n = len(results_list)
         aggregated = {}
         for metric in METRICS:
             values = [r.get(metric, 0.0) for r in results_list]
-            aggregated[metric] = np.mean(values)
-            aggregated[f'{metric}_std'] = np.std(values)
+            mean_val = np.mean(values)
+            std_val = np.std(values, ddof=1) if n > 1 else 0.0
+            # 95%置信区间: mean ± 1.96 * std / sqrt(n)
+            ci_95 = 1.96 * std_val / np.sqrt(n) if n > 1 else 0.0
+            aggregated[metric] = mean_val
+            aggregated[f'{metric}_std'] = std_val
+            aggregated[f'{metric}_ci95'] = ci_95
 
         return aggregated
 
@@ -103,9 +109,9 @@ class MetricsCollector:
                                  variable_name: str,
                                  results: Dict[Any, Dict[str, Dict[str, float]]]) -> List[str]:
         """
-        导出单变量实验结果到CSV（按算法分目录保存）
+        导出单变量实验结果到CSV
 
-        目录结构: results/{变量目录}/{算法名}/results.csv
+        目录结构: results/{变量目录}/{算法名}_results.csv
 
         Args:
             variable_name: 变量名称
@@ -116,28 +122,36 @@ class MetricsCollector:
         """
         # 获取变量目录名
         var_dir = VARIABLE_DIR_MAP.get(variable_name, variable_name)
+        var_dir_path = os.path.join(self.results_dir, var_dir)
+        os.makedirs(var_dir_path, exist_ok=True)
         filepaths = []
 
-        # 为每个算法创建目录并保存结果
-        for algo in ALGORITHMS:
-            # 创建算法目录
-            algo_dir = os.path.join(self.results_dir, var_dir, algo)
-            os.makedirs(algo_dir, exist_ok=True)
+        # 从结果中提取实际运行的算法列表
+        actual_algorithms = set()
+        for var_value in results.values():
+            actual_algorithms.update(var_value.keys())
 
-            filepath = os.path.join(algo_dir, 'results.csv')
+        # 只为实际运行的算法保存结果文件
+        for algo in actual_algorithms:
+            filepath = os.path.join(var_dir_path, f'{algo}_results.csv')
 
             with open(filepath, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
 
-                # 写入表头
-                header = ['variable_value'] + METRICS
+                # 写入表头（包含均值和95%置信区间）
+                header = ['variable_value']
+                for m in METRICS:
+                    header.extend([m, f'{m}_ci95'])
                 writer.writerow(header)
 
                 # 写入数据行
                 for var_value in sorted(results.keys()):
                     algo_results = results[var_value]
                     metrics = algo_results.get(algo, {})
-                    row = [var_value] + [metrics.get(m, 0.0) for m in METRICS]
+                    row = [var_value]
+                    for m in METRICS:
+                        row.append(metrics.get(m, 0.0))
+                        row.append(metrics.get(f'{m}_ci95', 0.0))
                     writer.writerow(row)
 
             print(f"结果已保存到: {filepath}")
@@ -157,23 +171,34 @@ class MetricsCollector:
         """
         filepath = os.path.join(self.results_dir, SUMMARY_FILE)
 
+        # 从结果中提取实际运行的算法列表
+        actual_algorithms = set()
+        for var_results in all_results.values():
+            for algo_results in var_results.values():
+                actual_algorithms.update(algo_results.keys())
+
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
 
-            # 写入表头
-            header = ['experiment_type', 'variable_name', 'variable_value', 'algorithm'] + METRICS
+            # 写入表头（包含均值和95%置信区间）
+            header = ['experiment_type', 'variable_name', 'variable_value', 'algorithm']
+            for m in METRICS:
+                header.extend([m, f'{m}_ci95'])
             writer.writerow(header)
 
-            # 写入数据行
+            # 写入数据行 - 只写入实际运行的算法
             for var_name, var_results in all_results.items():
                 exp_type = VARIABLE_DIR_MAP.get(var_name, var_name)
                 for var_value in sorted(var_results.keys()):
                     algo_results = var_results[var_value]
-                    for algo in ALGORITHMS:
-                        metrics = algo_results.get(algo, {})
-                        row = [exp_type, var_name, var_value, algo]
-                        row += [metrics.get(m, 0.0) for m in METRICS]
-                        writer.writerow(row)
+                    for algo in actual_algorithms:
+                        if algo in algo_results:
+                            metrics = algo_results[algo]
+                            row = [exp_type, var_name, var_value, algo]
+                            for m in METRICS:
+                                row.append(metrics.get(m, 0.0))
+                                row.append(metrics.get(f'{m}_ci95', 0.0))
+                            writer.writerow(row)
 
         print(f"汇总结果已保存到: {filepath}")
         return filepath
@@ -183,6 +208,12 @@ class MetricsCollector:
         print(f"\n{'='*90}")
         print(f"变量实验结果: {variable_name}")
         print('='*90)
+
+        # 从结果中提取实际运行的算法列表
+        actual_algorithms = set()
+        for var_value in results.values():
+            actual_algorithms.update(var_value.keys())
+        actual_algorithms = sorted(actual_algorithms)
 
         for var_value in sorted(results.keys()):
             print(f"\n--- {variable_name} = {var_value} ---")
@@ -196,8 +227,8 @@ class MetricsCollector:
             print()
             print('-'*90)
 
-            # 数据行
-            for algo in ALGORITHMS:
+            # 数据行 - 只打印实际运行的算法
+            for algo in actual_algorithms:
                 metrics = algo_results.get(algo, {})
                 print(f"{algo:<12}", end='')
                 for metric in METRICS:

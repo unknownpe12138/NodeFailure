@@ -12,6 +12,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.problem import RTMONFProblem
 from algorithms.rtm_rpf import RTM_RPF
+from algorithms.sptm import SPTM
+from algorithms.lbtm import LBTM
 from experiments.evaluator import Evaluator
 
 
@@ -59,6 +61,10 @@ class ExperimentRunner:
             results = self._run_greedy(problem, execute_failure, random_seed)
         elif algorithm_name == "RANDOM":
             results = self._run_random(problem, execute_failure, random_seed)
+        elif algorithm_name == "SPTM":
+            results = self._run_sptm(problem, execute_failure, random_seed)
+        elif algorithm_name == "LBTM":
+            results = self._run_lbtm(problem, execute_failure, random_seed)
         else:
             raise ValueError(f"未知算法: {algorithm_name}")
 
@@ -256,6 +262,26 @@ class ExperimentRunner:
 
         return results
 
+    def _run_sptm(self,
+                  problem: RTMONFProblem,
+                  execute_failure: bool,
+                  random_seed: Optional[int]) -> Dict:
+        """运行SPTM算法（基于最短路径的任务迁移）"""
+        algorithm = SPTM(problem=problem, random_seed=random_seed)
+        results = algorithm.solve(execute_failure=execute_failure)
+        results['summary'] = algorithm.get_solution_summary()
+        return results
+
+    def _run_lbtm(self,
+                  problem: RTMONFProblem,
+                  execute_failure: bool,
+                  random_seed: Optional[int]) -> Dict:
+        """运行LBTM算法（基于负载均衡的任务迁移）"""
+        algorithm = LBTM(problem=problem, random_seed=random_seed)
+        results = algorithm.solve(execute_failure=execute_failure)
+        results['summary'] = algorithm.get_solution_summary()
+        return results
+
     def run_comparison(self,
                        problem: RTMONFProblem,
                        algorithms: List[str] = None,
@@ -274,7 +300,7 @@ class ExperimentRunner:
             {algorithm_name: averaged_results}
         """
         if algorithms is None:
-            algorithms = ["RTM-RPF", "GREEDY", "RANDOM"]
+            algorithms = ["RTM-RPF", "SPTM", "LBTM", "GREEDY", "RANDOM"]
 
         all_results = {algo: [] for algo in algorithms}
 

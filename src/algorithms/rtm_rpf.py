@@ -42,8 +42,8 @@ class RTM_RPF:
                  kappa_link: float = 0.1,
                  L_max: float = 10.0,
                  # 任务分配参数
-                 alpha1: float = 0.3,
-                 alpha2: float = 0.3,
+                 alpha1: float = 0.35,
+                 alpha2: float = 0.25,
                  alpha3: float = 0.2,
                  alpha4: float = 0.2,
                  # 其他参数

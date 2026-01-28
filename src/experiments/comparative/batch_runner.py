@@ -105,6 +105,79 @@ class BatchExperimentRunner:
 
         return results
 
+    def run_algorithms_on_same_scenario(self, params: Dict, seed: int) -> Dict[str, Dict[str, float]]:
+        """
+        在相同的失效场景上运行所有算法（修复：确保公平对比）
+
+        Args:
+            params: 实验参数
+            seed: 随机种子
+
+        Returns:
+            {算法名: 指标字典}
+        """
+        from experiments.scenario_generator import ScenarioGenerator
+        from core.failure import FailureModel
+        import copy
+
+        # 1. 创建共享的问题实例
+        generator = ScenarioGenerator(seed=seed)
+        problem = generator.generate_scenario(
+            num_agents=params.get('num_agents', DEFAULT_PARAMS['num_agents']),
+            num_layers=params.get('num_layers', DEFAULT_PARAMS['num_layers']),
+            num_tasks=params.get('num_tasks', DEFAULT_PARAMS['num_tasks']),
+            num_roles_per_agent=params.get('num_roles_per_agent', DEFAULT_PARAMS['num_roles_per_agent']),
+            connection_prob=params.get('connection_prob', DEFAULT_PARAMS['connection_prob']),
+            failure_rate=params.get('failure_rate', DEFAULT_PARAMS['failure_rate']),
+            num_capabilities=params.get('num_capabilities', DEFAULT_PARAMS['num_capabilities']),
+            capability_coverage=params.get('capability_coverage', DEFAULT_PARAMS['capability_coverage']),
+            lambda1=params.get('lambda1', DEFAULT_PARAMS['lambda1']),
+            lambda2=params.get('lambda2', DEFAULT_PARAMS['lambda2']),
+        )
+
+        # 2. 执行一次失效判定（所有算法共享）
+        failure_model = FailureModel()
+        failure_model.update_all_failure_probabilities(problem.agents, problem.network)
+        failure_model.execute_monte_carlo_death(problem.agents, seed)
+        failure_model.identify_cascade_failures(problem.agents, problem.network)
+        failure_model.identify_interrupted_tasks(problem.agents, problem.tasks)
+
+        # 保存失效状态和初始状态
+        initial_state = {
+            'physical_state': {aid: agent.physical_state for aid, agent in problem.agents.items()},
+            'functional_state': {aid: agent.functional_state for aid, agent in problem.agents.items()},
+            'load': {aid: agent.load for aid, agent in problem.agents.items()},
+            'current_role': {aid: agent.current_role for aid, agent in problem.agents.items()},
+        }
+
+        results = {}
+
+        # 3. 对每个算法运行（使用相同的失效场景）
+        for algorithm in self.algorithms:
+            # 恢复初始状态
+            for aid, agent in problem.agents.items():
+                agent.physical_state = initial_state['physical_state'][aid]
+                agent.functional_state = initial_state['functional_state'][aid]
+                agent.load = initial_state['load'][aid]
+                agent.current_role = initial_state['current_role'][aid]
+
+            # 运行算法（不再执行失效判定）
+            algo_results = self.runner.run_algorithm(
+                problem=problem,
+                algorithm_name=algorithm,
+                execute_failure=False,  # 关键：不再执行失效判定
+                random_seed=seed
+            )
+
+            # 添加失效统计
+            algo_results['failure_statistics'] = failure_model.get_statistics()
+
+            # 收集指标
+            metrics = self.metrics_collector.collect_metrics(algo_results, problem)
+            results[algorithm] = metrics
+
+        return results
+
     def run_variable_experiment(self,
                                  variable_name: str,
                                  variable_values: List = None,
@@ -151,13 +224,16 @@ class BatchExperimentRunner:
                     print(f"  进度: {run_idx + 1}/{self.num_runs}")
 
                 try:
-                    # 对每个算法运行实验
+                    # 使用新方法：所有算法在相同场景上运行
+                    run_results = self.run_algorithms_on_same_scenario(params, seed)
+
+                    # 分配到各算法的结果列表
                     for algorithm in self.algorithms:
-                        metrics = self.run_single_experiment(params, algorithm, seed)
-                        algo_run_results[algorithm].append(metrics)
+                        if algorithm in run_results:
+                            algo_run_results[algorithm].append(run_results[algorithm])
                 except Exception as e:
-                    if self.verbose:
-                        print(f"  警告: 第{run_idx + 1}次实验失败 - {e}")
+                    # 始终打印错误信息，便于调试
+                    print(f"  警告: 第{run_idx + 1}次实验失败 - {e}")
                     continue
 
             # 聚合每个算法的结果
