@@ -242,6 +242,41 @@ class TaskSet:
         for task in self.tasks.values():
             task.reset_state()
 
+    def split_into_batches(self, num_batches: int, strategy: str = 'random') -> List[List[int]]:
+        """
+        将任务集分成多个批次
+
+        Args:
+            num_batches: 批次数量
+            strategy: 分批策略 ('random', 'priority', 'urgency')
+
+        Returns:
+            List[List[int]]: 任务ID批次列表
+        """
+        all_task_ids = list(self.tasks.keys())
+
+        if strategy == 'random':
+            # 随机打乱后均匀分批
+            np.random.shuffle(all_task_ids)
+        elif strategy == 'priority':
+            # 按优先级排序后均匀分批
+            sorted_tasks = sorted(self.tasks.values(), key=lambda t: t.priority, reverse=True)
+            all_task_ids = [t.task_id for t in sorted_tasks]
+        elif strategy == 'urgency':
+            # 按紧迫度排序后均匀分批
+            sorted_tasks = sorted(self.tasks.values(), key=lambda t: t.urgency, reverse=True)
+            all_task_ids = [t.task_id for t in sorted_tasks]
+
+        # 均匀分批
+        batch_size = len(all_task_ids) // num_batches
+        batches = []
+        for i in range(num_batches):
+            start = i * batch_size
+            end = start + batch_size if i < num_batches - 1 else len(all_task_ids)
+            batches.append(all_task_ids[start:end])
+
+        return batches
+
     def __repr__(self):
         interrupted = sum(1 for t in self.tasks.values() if t.is_interrupted)
         return f"TaskSet(num_tasks={self.num_tasks}, interrupted={interrupted}, total_load={self.get_total_workload():.2f})"

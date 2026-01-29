@@ -101,12 +101,13 @@ class RTM_RPF:
         self.replenishment_plan: Dict[int, Tuple[int, Role]] = {}
         self.path_reliability: Dict[int, float] = {}
 
-    def solve(self, execute_failure: bool = True) -> Dict:
+    def solve(self, execute_failure: bool = True, task_subset: Optional[List[int]] = None) -> Dict:
         """
         执行完整的RTM-RPF算法
 
         Args:
-            execute_failure: 是否执行失效判定（用于测试）
+            execute_failure: 是否执行失效判定（用于测试和分批模式）
+            task_subset: 待分配的任务ID列表（分批模式下使用，None表示分配所有任务）
 
         Returns:
             解的字典，包含各项指标和分配方案
@@ -183,8 +184,16 @@ class RTM_RPF:
         rpd_matrix = self.risk_field.execute_rpf_pp(agents, network, source_agents)
 
         # ==================== 阶段6: 基于韧性适配度的任务分配 (TA-RF) ====================
+        # 确定待分配任务
+        if task_subset is not None:
+            # 分批模式：只分配指定的任务子集
+            tasks_to_assign = [tasks.get_task(tid) for tid in task_subset if tasks.get_task(tid) is not None]
+        else:
+            # 原有模式：分配所有任务
+            tasks_to_assign = tasks.get_all_tasks()
+
         self.task_assignment, self.migration_flows = self._execute_ta_rf(
-            agents, network, tasks, rpd_matrix
+            agents, network, tasks_to_assign, rpd_matrix
         )
 
         # 计算路径可靠性
@@ -216,7 +225,7 @@ class RTM_RPF:
     def _execute_ta_rf(self,
                        agents: Dict[int, ResilientAgent],
                        network: ResilientMultiLayerNetwork,
-                       tasks: TaskSet,
+                       tasks_to_assign: List[Task],
                        rpd_matrix: Dict[Tuple[int, int], float]) -> Tuple[Dict[int, int], Dict[Tuple[int, int, int], int]]:
         """
         算法3-3: 基于韧性适配度的任务分配 (TA-RF)
@@ -224,7 +233,7 @@ class RTM_RPF:
         Args:
             agents: 智能体字典
             network: 多重网络
-            tasks: 任务集合
+            tasks_to_assign: 待分配的任务列表（支持任务子集）
             rpd_matrix: 风险势能距离矩阵
 
         Returns:
@@ -248,7 +257,7 @@ class RTM_RPF:
         L_max = max(agent.load for agent in functional_agents.values()) + 1.0
 
         # 按优先级排序任务
-        sorted_tasks = tasks.sort_by_priority()
+        sorted_tasks = sorted(tasks_to_assign, key=lambda t: t.priority, reverse=True)
 
         # 初始化智能体负载
         agent_loads = {aid: agent.load for aid, agent in functional_agents.items()}

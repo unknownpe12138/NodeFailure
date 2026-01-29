@@ -77,7 +77,8 @@ class ScenarioGenerator:
         self._generate_capability_pool(num_capabilities)
 
         # 2. 生成角色库
-        roles = self._generate_roles(num_roles=num_capabilities, capability_coverage=capability_coverage)
+        roles = self._generate_roles(num_roles=num_capabilities, capability_coverage=capability_coverage,
+                                     failure_rate=failure_rate)
 
         # 3. 生成智能体
         agents = self._generate_agents(num_agents, roles, num_roles_per_agent, failure_rate)
@@ -125,19 +126,35 @@ class ScenarioGenerator:
             for i in range(num_capabilities - len(base_capabilities)):
                 self.capability_pool.add(f'capability_{i}')
 
-    def _generate_roles(self, num_roles: int = 10, capability_coverage: float = 0.35) -> list:
+    def _generate_roles(self, num_roles: int = 10, capability_coverage: float = 0.35,
+                        failure_rate: float = 0.1) -> list:
         """
         生成角色库
 
         Args:
             num_roles: 角色数量
             capability_coverage: 能力覆盖率（每个角色拥有的能力比例）
+            failure_rate: 失效率（影响角色暴露风险，0.1为基准值）
         """
         roles = []
         pool_size = len(self.capability_pool)
 
         # 根据覆盖率计算每个角色的能力数量
         base_num_caps = max(1, int(pool_size * capability_coverage))
+
+        # 失效率影响因子：将 failure_rate 映射到暴露风险乘数
+        # failure_rate=0.05 时，risk_multiplier=0.75（降低风险）
+        # failure_rate=0.1 时，risk_multiplier=1.0（基准，保持原有风险）
+        # failure_rate=0.15 时，risk_multiplier=1.1
+        # failure_rate=0.2 时，risk_multiplier=1.2
+        # failure_rate=0.25 时，risk_multiplier=1.3
+        # 使用分段线性映射
+        if failure_rate <= 0.1:
+            # 0.05 -> 0.75, 0.1 -> 1.0
+            risk_multiplier = 0.75 + (failure_rate - 0.05) / 0.05 * 0.25
+        else:
+            # 0.1 -> 1.0, 0.25 -> 1.3
+            risk_multiplier = 1.0 + (failure_rate - 0.1) / 0.15 * 0.3
 
         for i in range(num_roles):
             role_type = self.role_types[i % len(self.role_types)]
@@ -154,15 +171,18 @@ class ScenarioGenerator:
 
             # 暴露风险：不同角色有不同风险
             if role_type == 'striker':
-                exposure_risk = np.random.uniform(0.6, 0.8)
+                base_risk = np.random.uniform(0.6, 0.8)
             elif role_type == 'scout':
-                exposure_risk = np.random.uniform(0.5, 0.7)
+                base_risk = np.random.uniform(0.5, 0.7)
             elif role_type == 'relay':
-                exposure_risk = np.random.uniform(0.3, 0.5)
+                base_risk = np.random.uniform(0.3, 0.5)
             elif role_type == 'commander':
-                exposure_risk = np.random.uniform(0.7, 0.9)  # 指挥节点高风险
+                base_risk = np.random.uniform(0.7, 0.9)  # 指挥节点高风险
             else:
-                exposure_risk = np.random.uniform(0.4, 0.6)
+                base_risk = np.random.uniform(0.4, 0.6)
+
+            # 应用 failure_rate 影响，确保不超过 0.95
+            exposure_risk = min(0.95, base_risk * risk_multiplier)
 
             role = Role(
                 role_id=i,

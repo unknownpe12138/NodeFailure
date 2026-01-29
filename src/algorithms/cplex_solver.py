@@ -83,8 +83,13 @@ class CPLEX_RTMONF_Solver:
 
         return failed_agents, functional_agents
 
-    def _build_model(self):
-        """构建RTM-ONF的MILP模型"""
+    def _build_model(self, task_subset: Optional[List[int]] = None):
+        """
+        构建RTM-ONF的MILP模型
+
+        Args:
+            task_subset: 待分配的任务ID列表（分批模式下使用）
+        """
         p = self.problem
         m = Model(name="RTMONF_CPLEX")
 
@@ -97,7 +102,12 @@ class CPLEX_RTMONF_Solver:
         failed_agents, functional_agents = self._get_failed_and_functional_agents()
 
         agent_ids = list(functional_agents)  # 只考虑功能有效的节点
-        tasks = p.tasks.get_all_tasks()
+
+        # 确定待分配任务
+        if task_subset is not None:
+            tasks = [p.tasks.get_task(tid) for tid in task_subset if p.tasks.get_task(tid) is not None]
+        else:
+            tasks = p.tasks.get_all_tasks()
         task_ids = [t.task_id for t in tasks]
 
         print(f"  功能有效节点: {len(agent_ids)}, 失效节点: {len(failed_agents)}, 任务: {len(task_ids)}")
@@ -357,10 +367,19 @@ class CPLEX_RTMONF_Solver:
 
         return m
 
-    def solve(self) -> Dict:
-        """求解模型"""
+    def solve(self, execute_failure: bool = True, task_subset: Optional[List[int]] = None) -> Dict:
+        """
+        求解模型
+
+        Args:
+            execute_failure: 是否执行失效判定（分批模式下为False）
+            task_subset: 待分配的任务ID列表（分批模式下使用）
+
+        Returns:
+            求解结果字典
+        """
         print("  构建CPLEX模型（RTM-ONF）...")
-        m = self._build_model()
+        m = self._build_model(task_subset)
 
         print("  开始求解...")
         sol = m.solve(log_output=False)

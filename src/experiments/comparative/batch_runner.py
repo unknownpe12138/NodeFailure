@@ -25,17 +25,26 @@ class BatchExperimentRunner:
                  num_runs: int = NUM_RUNS,
                  algorithms: List[str] = None,
                  results_dir: str = None,
-                 verbose: bool = True):
+                 verbose: bool = True,
+                 use_batch_mode: bool = False,
+                 batch_ratio: float = 0.2,
+                 batch_strategy: str = 'random'):
         """
         Args:
             num_runs: 每个实验重复次数
             algorithms: 要对比的算法列表
             results_dir: 结果保存目录
             verbose: 是否打印详细信息
+            use_batch_mode: 是否使用分批分配模式
+            batch_ratio: 分批比例（仅在use_batch_mode=True时有效）
+            batch_strategy: 分批策略（仅在use_batch_mode=True时有效）
         """
         self.num_runs = num_runs
         self.algorithms = algorithms if algorithms else ALGORITHMS
         self.verbose = verbose
+        self.use_batch_mode = use_batch_mode
+        self.batch_ratio = batch_ratio
+        self.batch_strategy = batch_strategy
         self.metrics_collector = MetricsCollector(results_dir)
         self.runner = ExperimentRunner()
 
@@ -71,13 +80,24 @@ class BatchExperimentRunner:
             lambda2=params.get('lambda2', DEFAULT_PARAMS['lambda2']),
         )
 
-        # 运行指定算法
-        results = self.runner.run_algorithm(
-            problem=problem,
-            algorithm_name=algorithm,
-            execute_failure=True,
-            random_seed=seed
-        )
+        # 根据模式运行算法
+        if self.use_batch_mode:
+            # 分批分配模式
+            results = self.runner.run_batch_allocation(
+                problem=problem,
+                algorithm_name=algorithm,
+                batch_ratio=self.batch_ratio,
+                batch_strategy=self.batch_strategy,
+                random_seed=seed
+            )
+        else:
+            # 原有模式（一次性分配）
+            results = self.runner.run_algorithm(
+                problem=problem,
+                algorithm_name=algorithm,
+                execute_failure=True,
+                random_seed=seed
+            )
 
         # 收集指标
         metrics = self.metrics_collector.collect_metrics(results, problem)
@@ -199,6 +219,10 @@ class BatchExperimentRunner:
         if base_params is None:
             base_params = DEFAULT_PARAMS.copy()
 
+        # 特殊处理权重配置实验
+        if variable_name == 'weight_config':
+            return self.run_weight_config_experiment(variable_values, base_params)
+
         results = {}
 
         for var_value in variable_values:
@@ -248,6 +272,100 @@ class BatchExperimentRunner:
                         print(f"  {algorithm}: 有效实验 {len(run_results)}/{self.num_runs}")
 
             results[var_value] = algo_aggregated
+
+        return results
+
+    def run_weight_config_experiment(self,
+                                     config_keys: List[str],
+                                     base_params: Dict) -> Dict[str, Dict[str, Dict[str, float]]]:
+        """
+        运行权重配置实验（特殊处理）
+
+        Args:
+            config_keys: 权重配置键列表 ['completion_focused', 'balanced', 'cost_focused']
+            base_params: 基础参数
+
+        Returns:
+            {配置键: {算法名: 平均指标字典}}
+        """
+        from experiments.comparative.config import WEIGHT_CONFIGS, WEIGHT_CONFIG_FIXED_PARAMS
+
+        results = {}
+
+        # 任务数量范围
+        task_counts = WEIGHT_CONFIG_FIXED_PARAMS['num_tasks']
+
+        for config_key in config_keys:
+            if config_key not in WEIGHT_CONFIGS:
+                print(f"警告: 未知的权重配置 {config_key}")
+                continue
+
+            config = WEIGHT_CONFIGS[config_key]
+
+            if self.verbose:
+                print(f"\n{'='*50}")
+                print(f"权重配置: {config_key}")
+                print(f"  λ1={config['lambda1']}, λ2={config['lambda2']}")
+                print(f"  任务数量范围: {task_counts}")
+                print(f"  固定智能体数量: {WEIGHT_CONFIG_FIXED_PARAMS['num_agents']}")
+                print('='*50)
+
+            # 对每个任务数量运行实验
+            config_results = {}
+
+            for num_tasks in task_counts:
+                if self.verbose:
+                    print(f"\n  任务数量: {num_tasks}")
+
+                # 设置参数
+                params = base_params.copy()
+                params['num_agents'] = WEIGHT_CONFIG_FIXED_PARAMS['num_agents']
+                params['num_tasks'] = num_tasks
+                params['lambda1'] = config['lambda1']
+                params['lambda2'] = config['lambda2']
+
+                # 每个算法的多次运行结果
+                algo_run_results = {algo: [] for algo in self.algorithms}
+
+                # 运行多次实验
+                for run_idx in range(self.num_runs):
+                    seed = 42 + run_idx
+
+                    if self.verbose and (run_idx + 1) % 10 == 0:
+                        print(f"    进度: {run_idx + 1}/{self.num_runs}")
+
+                    try:
+                        run_results = self.run_algorithms_on_same_scenario(params, seed)
+
+                        for algorithm in self.algorithms:
+                            if algorithm in run_results:
+                                algo_run_results[algorithm].append(run_results[algorithm])
+                    except Exception as e:
+                        print(f"    警告: 第{run_idx + 1}次实验失败 - {e}")
+                        continue
+
+                # 聚合每个算法的结果
+                for algorithm in self.algorithms:
+                    run_results = algo_run_results[algorithm]
+                    if run_results:
+                        aggregated = self.metrics_collector.aggregate_results(run_results)
+
+                        # 添加配置信息
+                        aggregated['lambda1'] = config['lambda1']
+                        aggregated['lambda2'] = config['lambda2']
+                        aggregated['num_tasks'] = num_tasks
+                        aggregated['config_key'] = config_key
+
+                        # 存储结果
+                        key = f"{config_key}_{num_tasks}"
+                        if key not in config_results:
+                            config_results[key] = {}
+                        config_results[key][algorithm] = aggregated
+
+                        if self.verbose:
+                            print(f"    {algorithm}: 有效实验 {len(run_results)}/{self.num_runs}")
+
+            results[config_key] = config_results
 
         return results
 

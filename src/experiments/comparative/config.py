@@ -26,6 +26,20 @@ VARIABLE_RANGES = {
     'num_agents': [15, 20, 25, 30, 35],
     'failure_rate': [0.05, 0.1, 0.15, 0.2, 0.25],
     'num_layers': [3, 4, 5, 6],
+    'weight_config': ['completion_focused', 'balanced', 'cost_focused'],  # 权重配置实验
+}
+
+# 权重配置映射
+WEIGHT_CONFIGS = {
+    'completion_focused': {'lambda1': 0.25, 'lambda2': 0.75},
+    'balanced': {'lambda1': 0.5, 'lambda2': 0.5},
+    'cost_focused': {'lambda1': 0.75, 'lambda2': 0.25},
+}
+
+# 权重配置实验的固定参数
+WEIGHT_CONFIG_FIXED_PARAMS = {
+    'num_agents': 25,
+    'num_tasks': [10, 20, 30, 40, 50],  # 任务数量作为变量
 }
 
 # 每个实验重复次数
@@ -53,6 +67,7 @@ VARIABLE_DIR_MAP = {
     'num_agents': 'agent_count',
     'failure_rate': 'failure_rate',
     'num_layers': 'network_layers',
+    'weight_config': 'weight_config',
 }
 
 # 汇总文件名

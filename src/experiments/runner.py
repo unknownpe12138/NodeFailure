@@ -367,6 +367,193 @@ class ExperimentRunner:
         """获取历史结果"""
         return self.results_history
 
+    def run_batch_allocation(self,
+                            problem: RTMONFProblem,
+                            algorithm_name: str = "RTM-RPF",
+                            batch_ratio: float = 0.2,
+                            batch_strategy: str = 'random',
+                            algorithm_params: Optional[Dict] = None,
+                            random_seed: int = 42) -> Dict:
+        """
+        分批分配主循环（简化版，只记录最终结果）
+
+        Args:
+            problem: RTMONFProblem实例
+            algorithm_name: 算法名称
+            batch_ratio: 每批任务比例
+            batch_strategy: 分批策略 ('random', 'priority', 'urgency')
+            algorithm_params: 算法参数
+            random_seed: 随机种子
+
+        Returns:
+            最终结果（与原有格式一致）
+        """
+        if algorithm_params is None:
+            algorithm_params = {}
+
+        start_time = time.time()
+
+        # 1. 初始化
+        problem.reset()
+        np.random.seed(random_seed)
+
+        # 2. 任务分批
+        num_batches = int(1.0 / batch_ratio)
+        task_batches = problem.tasks.split_into_batches(num_batches, batch_strategy)
+
+        print(f"\n=== 分批分配模式 ===")
+        print(f"  批次数: {num_batches}, 每批比例: {batch_ratio}")
+        print(f"  分批策略: {batch_strategy}")
+        print(f"  算法: {algorithm_name}")
+
+        # 3. 初始化失效模型
+        from core.failure import FailureModel
+        failure_model = FailureModel()
+        failure_model.update_all_failure_probabilities(problem.agents, problem.network)
+
+        # 4. 累积分配记录
+        cumulative_assignment = {}  # {task_id: agent_id}
+
+        # 5. 分批循环
+        for batch_idx, task_batch in enumerate(task_batches):
+            print(f"\n--- 批次 {batch_idx + 1}/{num_batches} ---")
+            print(f"  新任务数: {len(task_batch)}")
+
+            # 5.1 收集待分配任务（新任务 + 中断任务）
+            interrupted_tasks = self._get_interrupted_tasks(cumulative_assignment, problem.agents)
+            tasks_to_assign = task_batch + interrupted_tasks
+
+            print(f"  中断任务数: {len(interrupted_tasks)}")
+            print(f"  总待分配: {len(tasks_to_assign)}")
+
+            # 5.2 调用算法分配任务
+            batch_assignment = self._run_algorithm_for_batch(
+                problem, algorithm_name, tasks_to_assign,
+                algorithm_params, random_seed + batch_idx
+            )
+
+            # 5.3 更新累积分配
+            for task_id in interrupted_tasks:
+                if task_id in cumulative_assignment:
+                    del cumulative_assignment[task_id]
+            cumulative_assignment.update(batch_assignment)
+
+            print(f"  本批分配成功: {len(batch_assignment)}")
+
+            # 5.4 更新失效概率
+            failure_model.update_all_failure_probabilities(problem.agents, problem.network)
+
+            # 5.5 执行失效判定
+            batch_seed = random_seed + batch_idx * 1000
+            newly_failed = failure_model.execute_monte_carlo_death(problem.agents, batch_seed)
+
+            # 5.6 识别级联失效
+            if newly_failed:
+                failure_model.identify_cascade_failures(problem.agents, problem.network)
+                print(f"  新失效节点: {len(newly_failed)}")
+
+        # 6. 计算最终结果
+        end_time = time.time()
+        final_result = self._compute_final_metrics(problem, cumulative_assignment, failure_model)
+        final_result['execution_time'] = end_time - start_time
+        final_result['algorithm'] = algorithm_name
+        final_result['mode'] = 'batch'
+        final_result['batch_ratio'] = batch_ratio
+        final_result['num_batches'] = num_batches
+
+        print(f"\n=== 分批分配完成 ===")
+        print(f"  总分配任务数: {len(cumulative_assignment)}")
+        print(f"  总失效节点数: {len(failure_model.failed_agents)}")
+        print(f"  执行时间: {final_result['execution_time']:.2f}s")
+
+        self.results_history.append(final_result)
+        return final_result
+
+    def _get_interrupted_tasks(self, cumulative_assignment: Dict[int, int],
+                              agents: Dict) -> List[int]:
+        """获取需要重新分配的中断任务"""
+        interrupted = []
+        for task_id, agent_id in list(cumulative_assignment.items()):
+            agent = agents[agent_id]
+            if agent.physical_state == 0 or agent.functional_state == 0:
+                interrupted.append(task_id)
+        return interrupted
+
+    def _run_algorithm_for_batch(self, problem: RTMONFProblem,
+                                 algorithm_name: str,
+                                 task_ids: List[int],
+                                 algorithm_params: Dict,
+                                 seed: int) -> Dict[int, int]:
+        """为一批任务运行算法"""
+        if algorithm_name == 'RTM-RPF':
+            algo = RTM_RPF(
+                problem=problem,
+                alpha_risk=algorithm_params.get('alpha_risk', 0.8),
+                eta=algorithm_params.get('eta', 1.5),
+                gamma=algorithm_params.get('gamma', 2.0),
+                kappa_task=algorithm_params.get('kappa_task', 0.5),
+                eta_rer=algorithm_params.get('eta_rer', 0.1),
+                kappa_link=algorithm_params.get('kappa_link', 0.1),
+                L_max=algorithm_params.get('L_max', 10.0),
+                alpha1=algorithm_params.get('alpha1', 0.3),
+                alpha2=algorithm_params.get('alpha2', 0.3),
+                alpha3=algorithm_params.get('alpha3', 0.2),
+                alpha4=algorithm_params.get('alpha4', 0.2),
+                random_seed=seed
+            )
+            result = algo.solve(execute_failure=False, task_subset=task_ids)
+        elif algorithm_name == 'CPLEX':
+            from algorithms.cplex_solver import CPLEX_RTMONF_Solver
+            algo = CPLEX_RTMONF_Solver(problem)
+            result = algo.solve(execute_failure=False, task_subset=task_ids)
+        elif algorithm_name == 'SPTM':
+            algo = SPTM(problem, random_seed=seed)
+            result = algo.solve(execute_failure=False, task_subset=task_ids)
+        elif algorithm_name == 'LBTM':
+            algo = LBTM(problem, random_seed=seed)
+            result = algo.solve(execute_failure=False, task_subset=task_ids)
+        else:
+            raise ValueError(f"未知算法: {algorithm_name}")
+
+        return result.get('task_assignment', {})
+
+    def _compute_final_metrics(self, problem: RTMONFProblem,
+                              cumulative_assignment: Dict[int, int],
+                              failure_model) -> Dict:
+        """计算最终性能指标（与原有格式一致）"""
+        # 应用累积分配到任务集
+        for task_id, agent_id in cumulative_assignment.items():
+            task = problem.tasks.get_task(task_id)
+            if task:
+                task.assigned_agent = agent_id
+
+        # 计算指标
+        total_tasks = len(problem.tasks.get_all_tasks())
+        assigned_tasks = len(cumulative_assignment)
+        completion_ratio = assigned_tasks / total_tasks if total_tasks > 0 else 0.0
+
+        # 计算总成本
+        total_cost = 0.0
+        for task_id, agent_id in cumulative_assignment.items():
+            task = problem.tasks.get_task(task_id)
+            if task:
+                total_cost += task.workload
+
+        # 计算效用（简化版）
+        utility = completion_ratio * 100.0 - total_cost * 0.1
+
+        return {
+            'feasible': completion_ratio > 0,
+            'utility': utility,
+            'total_cost': total_cost,
+            'completion_ratio': completion_ratio,
+            'task_assignment': cumulative_assignment,
+            'num_assigned_tasks': assigned_tasks,
+            'total_failed_agents': len(failure_model.failed_agents),
+            'failure_statistics': failure_model.get_statistics()
+        }
+
+
     def clear_history(self):
         """清除历史结果"""
         self.results_history.clear()

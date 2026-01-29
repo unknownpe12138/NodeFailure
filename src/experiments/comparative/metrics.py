@@ -120,6 +120,10 @@ class MetricsCollector:
         Returns:
             CSV文件路径列表
         """
+        # 特殊处理权重配置实验
+        if variable_name == 'weight_config':
+            return self.export_weight_config_results(results)
+
         # 获取变量目录名
         var_dir = VARIABLE_DIR_MAP.get(variable_name, variable_name)
         var_dir_path = os.path.join(self.results_dir, var_dir)
@@ -156,6 +160,97 @@ class MetricsCollector:
 
             print(f"结果已保存到: {filepath}")
             filepaths.append(filepath)
+
+        return filepaths
+
+    def export_weight_config_results(self, results: Dict[str, Dict[str, Dict[str, float]]]) -> List[str]:
+        """
+        导出权重配置实验结果
+
+        格式：每个算法一个CSV文件，包含 lambda1, lambda2, num_tasks 和其他指标
+
+        Args:
+            results: {config_key: {config_key_num_tasks: {algorithm: metrics}}}
+
+        Returns:
+            CSV文件路径列表
+        """
+        var_dir_path = os.path.join(self.results_dir, 'weight_config')
+        os.makedirs(var_dir_path, exist_ok=True)
+        filepaths = []
+
+        # 收集所有数据
+        all_data = []
+        for config_key, config_results in results.items():
+            for key, algo_results in config_results.items():
+                for algorithm, metrics in algo_results.items():
+                    all_data.append({
+                        'algorithm': algorithm,
+                        'lambda1': metrics.get('lambda1', 0),
+                        'lambda2': metrics.get('lambda2', 0),
+                        'num_tasks': metrics.get('num_tasks', 0),
+                        'config_key': metrics.get('config_key', config_key),
+                        'metrics': metrics
+                    })
+
+        # 按算法分组
+        algo_data = {}
+        for item in all_data:
+            algo = item['algorithm']
+            if algo not in algo_data:
+                algo_data[algo] = []
+            algo_data[algo].append(item)
+
+        # 为每个算法生成CSV文件
+        for algo, data_list in algo_data.items():
+            filepath = os.path.join(var_dir_path, f'{algo}_results.csv')
+
+            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+
+                # 写入表头
+                header = ['lambda1', 'lambda2', 'num_tasks']
+                for m in METRICS:
+                    header.extend([m, f'{m}_ci95'])
+                writer.writerow(header)
+
+                # 按 lambda1, lambda2, num_tasks 排序
+                data_list.sort(key=lambda x: (x['lambda1'], x['lambda2'], x['num_tasks']))
+
+                # 写入数据行
+                for item in data_list:
+                    metrics = item['metrics']
+                    row = [item['lambda1'], item['lambda2'], item['num_tasks']]
+                    for m in METRICS:
+                        row.append(metrics.get(m, 0.0))
+                        row.append(metrics.get(f'{m}_ci95', 0.0))
+                    writer.writerow(row)
+
+            print(f"结果已保存到: {filepath}")
+            filepaths.append(filepath)
+
+        # 同时生成汇总文件
+        summary_path = os.path.join(var_dir_path, 'weight_config_summary.csv')
+        with open(summary_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+
+            # 写入表头
+            header = ['algorithm', 'config_key', 'lambda1', 'lambda2', 'num_tasks']
+            for m in METRICS:
+                header.append(m)
+            writer.writerow(header)
+
+            # 写入所有数据
+            all_data.sort(key=lambda x: (x['config_key'], x['num_tasks'], x['algorithm']))
+            for item in all_data:
+                metrics = item['metrics']
+                row = [item['algorithm'], item['config_key'], item['lambda1'], item['lambda2'], item['num_tasks']]
+                for m in METRICS:
+                    row.append(metrics.get(m, 0.0))
+                writer.writerow(row)
+
+        print(f"汇总结果已保存到: {summary_path}")
+        filepaths.append(summary_path)
 
         return filepaths
 
