@@ -4,7 +4,7 @@
 """
 
 # 算法列表
-ALGORITHMS = ['CPLEX', 'RTM-RPF', 'SPTM', 'LBTM']
+ALGORITHMS = ['M1', 'M2', 'M3', 'M4', 'RTM-RPF', 'CPLEX', 'SPTM', 'LBTM']
 
 # 默认参数
 DEFAULT_PARAMS = {

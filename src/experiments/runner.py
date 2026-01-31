@@ -53,6 +53,14 @@ class ExperimentRunner:
             results = self._run_rtm_rpf(
                 problem, algorithm_params, execute_failure, random_seed
             )
+        elif algorithm_name == "M1":
+            results = self._run_m1(problem, execute_failure, random_seed)
+        elif algorithm_name == "M2":
+            results = self._run_m2(problem, algorithm_params, execute_failure, random_seed)
+        elif algorithm_name == "M3":
+            results = self._run_m3(problem, algorithm_params, execute_failure, random_seed)
+        elif algorithm_name == "M4":
+            results = self._run_m4(problem, algorithm_params, execute_failure, random_seed)
         elif algorithm_name == "CPLEX":
             results = self._run_cplex(
                 problem, algorithm_params, execute_failure, random_seed
@@ -282,6 +290,84 @@ class ExperimentRunner:
         results['summary'] = algorithm.get_solution_summary()
         return results
 
+    def _run_m1(self,
+                problem: RTMONFProblem,
+                execute_failure: bool,
+                random_seed: Optional[int]) -> Dict:
+        """运行M1算法（随机补位 + 最短路径 + 贪心分配）"""
+        from algorithms.ablation_m1 import AblationM1
+        algorithm = AblationM1(problem=problem, random_seed=random_seed)
+        results = algorithm.solve(execute_failure=execute_failure)
+        return results
+
+    def _run_m2(self,
+                problem: RTMONFProblem,
+                params: Dict,
+                execute_failure: bool,
+                random_seed: Optional[int]) -> Dict:
+        """运行M2算法（随机补位 + RPF-PP + TA-RF）"""
+        from algorithms.ablation_m2 import AblationM2
+        algorithm = AblationM2(
+            problem=problem,
+            alpha_risk=params.get('alpha_risk', 0.8),
+            eta=params.get('eta', 1.5),
+            gamma=params.get('gamma', 2.0),
+            kappa_task=params.get('kappa_task', 0.5),
+            alpha1=params.get('alpha1', 0.35),
+            alpha2=params.get('alpha2', 0.25),
+            alpha3=params.get('alpha3', 0.2),
+            alpha4=params.get('alpha4', 0.2),
+            random_seed=random_seed
+        )
+        results = algorithm.solve(execute_failure=execute_failure)
+        return results
+
+    def _run_m3(self,
+                problem: RTMONFProblem,
+                params: Dict,
+                execute_failure: bool,
+                random_seed: Optional[int]) -> Dict:
+        """运行M3算法（GD-RER + 最短路径 + TA-RF）"""
+        from algorithms.ablation_m3 import AblationM3
+        algorithm = AblationM3(
+            problem=problem,
+            alpha_risk=params.get('alpha_risk', 0.8),
+            eta=params.get('eta', 1.5),
+            gamma=params.get('gamma', 2.0),
+            kappa_task=params.get('kappa_task', 0.5),
+            eta_rer=params.get('eta_rer', 0.1),
+            kappa_link=params.get('kappa_link', 0.1),
+            L_max=params.get('L_max', 10.0),
+            alpha1=params.get('alpha1', 0.35),
+            alpha2=params.get('alpha2', 0.25),
+            alpha3=params.get('alpha3', 0.2),
+            alpha4=params.get('alpha4', 0.2),
+            random_seed=random_seed
+        )
+        results = algorithm.solve(execute_failure=execute_failure)
+        return results
+
+    def _run_m4(self,
+                problem: RTMONFProblem,
+                params: Dict,
+                execute_failure: bool,
+                random_seed: Optional[int]) -> Dict:
+        """运行M4算法（GD-RER + RPF-PP + 贪心分配）"""
+        from algorithms.ablation_m4 import AblationM4
+        algorithm = AblationM4(
+            problem=problem,
+            alpha_risk=params.get('alpha_risk', 0.8),
+            eta=params.get('eta', 1.5),
+            gamma=params.get('gamma', 2.0),
+            kappa_task=params.get('kappa_task', 0.5),
+            eta_rer=params.get('eta_rer', 0.1),
+            kappa_link=params.get('kappa_link', 0.1),
+            L_max=params.get('L_max', 10.0),
+            random_seed=random_seed
+        )
+        results = algorithm.solve(execute_failure=execute_failure)
+        return results
+
     def run_comparison(self,
                        problem: RTMONFProblem,
                        algorithms: List[str] = None,
@@ -502,6 +588,57 @@ class ExperimentRunner:
                 random_seed=seed
             )
             result = algo.solve(execute_failure=False, task_subset=task_ids)
+        elif algorithm_name == 'M1':
+            from algorithms.ablation_m1 import AblationM1
+            algo = AblationM1(problem=problem, random_seed=seed)
+            result = algo.solve(execute_failure=False, task_subset=task_ids)
+        elif algorithm_name == 'M2':
+            from algorithms.ablation_m2 import AblationM2
+            algo = AblationM2(
+                problem=problem,
+                alpha_risk=algorithm_params.get('alpha_risk', 0.8),
+                eta=algorithm_params.get('eta', 1.5),
+                gamma=algorithm_params.get('gamma', 2.0),
+                kappa_task=algorithm_params.get('kappa_task', 0.5),
+                alpha1=algorithm_params.get('alpha1', 0.35),
+                alpha2=algorithm_params.get('alpha2', 0.25),
+                alpha3=algorithm_params.get('alpha3', 0.2),
+                alpha4=algorithm_params.get('alpha4', 0.2),
+                random_seed=seed
+            )
+            result = algo.solve(execute_failure=False, task_subset=task_ids)
+        elif algorithm_name == 'M3':
+            from algorithms.ablation_m3 import AblationM3
+            algo = AblationM3(
+                problem=problem,
+                alpha_risk=algorithm_params.get('alpha_risk', 0.8),
+                eta=algorithm_params.get('eta', 1.5),
+                gamma=algorithm_params.get('gamma', 2.0),
+                kappa_task=algorithm_params.get('kappa_task', 0.5),
+                eta_rer=algorithm_params.get('eta_rer', 0.1),
+                kappa_link=algorithm_params.get('kappa_link', 0.1),
+                L_max=algorithm_params.get('L_max', 10.0),
+                alpha1=algorithm_params.get('alpha1', 0.35),
+                alpha2=algorithm_params.get('alpha2', 0.25),
+                alpha3=algorithm_params.get('alpha3', 0.2),
+                alpha4=algorithm_params.get('alpha4', 0.2),
+                random_seed=seed
+            )
+            result = algo.solve(execute_failure=False, task_subset=task_ids)
+        elif algorithm_name == 'M4':
+            from algorithms.ablation_m4 import AblationM4
+            algo = AblationM4(
+                problem=problem,
+                alpha_risk=algorithm_params.get('alpha_risk', 0.8),
+                eta=algorithm_params.get('eta', 1.5),
+                gamma=algorithm_params.get('gamma', 2.0),
+                kappa_task=algorithm_params.get('kappa_task', 0.5),
+                eta_rer=algorithm_params.get('eta_rer', 0.1),
+                kappa_link=algorithm_params.get('kappa_link', 0.1),
+                L_max=algorithm_params.get('L_max', 10.0),
+                random_seed=seed
+            )
+            result = algo.solve(execute_failure=False, task_subset=task_ids)
         elif algorithm_name == 'CPLEX':
             from algorithms.cplex_solver import CPLEX_RTMONF_Solver
             algo = CPLEX_RTMONF_Solver(problem)
@@ -520,38 +657,40 @@ class ExperimentRunner:
     def _compute_final_metrics(self, problem: RTMONFProblem,
                               cumulative_assignment: Dict[int, int],
                               failure_model) -> Dict:
-        """计算最终性能指标（与原有格式一致）"""
-        # 应用累积分配到任务集
-        for task_id, agent_id in cumulative_assignment.items():
-            task = problem.tasks.get_task(task_id)
-            if task:
-                task.assigned_agent = agent_id
+        """计算最终性能指标（使用problem.evaluate_solution）"""
 
-        # 计算指标
-        total_tasks = len(problem.tasks.get_all_tasks())
-        assigned_tasks = len(cumulative_assignment)
-        completion_ratio = assigned_tasks / total_tasks if total_tasks > 0 else 0.0
-
-        # 计算总成本
-        total_cost = 0.0
-        for task_id, agent_id in cumulative_assignment.items():
-            task = problem.tasks.get_task(task_id)
-            if task:
-                total_cost += task.workload
-
-        # 计算效用（简化版）
-        utility = completion_ratio * 100.0 - total_cost * 0.1
-
-        return {
-            'feasible': completion_ratio > 0,
-            'utility': utility,
-            'total_cost': total_cost,
-            'completion_ratio': completion_ratio,
-            'task_assignment': cumulative_assignment,
-            'num_assigned_tasks': assigned_tasks,
-            'total_failed_agents': len(failure_model.failed_agents),
-            'failure_statistics': failure_model.get_statistics()
+        # 1. 构建role_assignment（从当前agent状态）
+        role_assignment = {
+            aid: agent.current_role
+            for aid, agent in problem.agents.items()
         }
+
+        # 2. 构建migration_flows（从任务分配）
+        migration_flows = {}
+        for task_id, target_agent in cumulative_assignment.items():
+            task = problem.tasks.get_task(task_id)
+            if task:
+                # 获取任务的原始位置（如果有的话）
+                source_agent = task.current_agent if task.current_agent else target_agent
+                migration_flows[(source_agent, target_agent, task_id)] = 1
+
+        # 3. 空的replenishment_plan（补位在批次前已完成）
+        replenishment_plan = {}
+
+        # 4. 调用problem.evaluate_solution获取完整评估
+        results = problem.evaluate_solution(
+            cumulative_assignment,
+            role_assignment,
+            migration_flows,
+            replenishment_plan
+        )
+
+        # 5. 添加失效统计
+        results['failure_statistics'] = failure_model.get_statistics()
+        results['num_assigned_tasks'] = len(cumulative_assignment)
+        results['total_failed_agents'] = len(failure_model.failed_agents)
+
+        return results
 
 
     def clear_history(self):
